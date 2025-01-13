@@ -5,7 +5,6 @@ from typing import Tuple
 
 class CleaningAgent(ap.Agent):
     def setup(self) -> None:
-        self.moves = 0
         self.internal_state: int = 0
 
     def see(self) -> int:
@@ -42,7 +41,8 @@ class CleaningModel(ap.Model):
             p=[1 - self.p["dirt_percentage"], self.p["dirt_percentage"]],
         )
         self.agents = ap.AgentList(self, self.p["n_agents"], CleaningAgent)
-        self.agents.pos = (1, 1) * self.p["n_agents"]
+        self.agents.pos = (1, 1)
+        self.agents.moves = 0
         print(self.grid)
 
     def step(self) -> None:
