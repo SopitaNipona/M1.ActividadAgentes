@@ -5,88 +5,126 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from typing import Tuple
 
-class CleaningAgent(ap.Agent):
+DIRECTIONS_TO_DELTAS_DICT: dict = {
+    "up": (-1, 0),
+    "down": (1, 0),
+    "left": (0, -1),
+    "right": (0, 1),
+    "up-left": (-1, -1),
+    "up-right": (-1, 1),
+    "down-left": (1, -1),
+    "down-right": (1, 1),
+}
+
+
+class BasicVacuumAgent(ap.Agent):
     def setup(self) -> None:
-        self.internal_state: int = 0
-        self.moves = 0
+        self.pos: Tuple[int, int] = (1, 1)
+        self.i: list = ["idle", (0, 0)]
+        self.long_term_utility: int = 0
 
     def see(self) -> int:
         return self.model.grid[self.pos[0], self.pos[1]]
 
-    def next(self, percept: int) -> int:
-        self.internal_state = percept
-        return self.internal_state
-
-    def action(self, internal_state: int) -> None:
-        if internal_state:
-            self.model.grid[self.pos[0], self.pos[1]] = 0
+    def next(self, percept: int) -> None:
+        if percept:
+            self.i[0] = "clean"
         else:
-            move = self.model.random.choice(
-                [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)]
+            position_delta: Tuple[int, int] = self.model.random.choice(
+                list(DIRECTIONS_TO_DELTAS_DICT.values())
             )
-            new_pos = (self.pos[0] + move[0], self.pos[1] + move[1])
-            if self.model.is_valid_position(new_pos):
-                self.pos = new_pos
-                self.moves += 1
-                self.record('moves', self.moves)
+            tentative_new_pos: Tuple[int, int] = tuple(
+                map(sum, zip(self.pos, position_delta))
+            )
+            if self.model.is_in_bounds(tentative_new_pos):
+                self.i: list = ["move", tentative_new_pos]
+            else:
+                self.i[0] = "idle"
+
+    def action(self) -> None:
+        if self.i[0] == "clean":
+            self.model.grid[self.pos[0], self.pos[1]] = 0
+            self.long_term_utility += 1
+        elif self.i[0] == "move":
+            self.pos: Tuple[int, int] = self.i[1]
+            self.record("movements", 1)
+        elif self.i[0] == "idle":
+            self.record("movements", 0)
+
+    def work(self) -> None:
+        self.next(self.see())
+        self.action()
 
 
-class CleaningModel(ap.Model):
+class VacuumModel(ap.Model):
     def setup(self) -> None:
-        self.grid_size: Tuple[int, int] = self.p["grid_size"]
-        self.grid = np.zeros(self.grid_size, dtype=int)
+        self.grid_size: Tuple[int, int] = (self.p["n"], self.p["m"])
+        self.grid: np.ndarray = np.zeros(self.grid_size, dtype=int)
         self.grid[:] = np.random.choice(
             [0, 1],
             size=self.grid_size,
             p=[1 - self.p["dirt_percentage"], self.p["dirt_percentage"]],
         )
-        self.agents = ap.AgentList(self, self.p["n_agents"], CleaningAgent)
-        self.agents.pos = (1, 1)
+        self.agents: ap.AgentList = ap.AgentList(
+            self, self.p["k0"], BasicVacuumAgent
+        )  # TODO: Add agents
 
     def step(self) -> None:
-        for agent in self.agents:
-            agent.action(agent.next(agent.see()))
+        self.agents.work()
         if self.grid.sum() == 0:
             self.stop()
-            
-    def end(self):
-        total_steps = sum(agent.moves for agent in self.agents)
-        self.report('total_steps', total_steps)
-        self.report('n_agents', self.p["n_agents"])
-        self.report('steps_used', self.t)
 
-    def is_valid_position(self, pos: Tuple[int, int]) -> bool:
-        return 0 <= pos[0] < self.grid_size[0] and 0 <= pos[1] < self.grid_size[1]
+    def end(self):
+        self.report("time_used", self.t)
+        self.report("clean_percentage", self.clean_percentage())
+        movements_made: int = sum(
+            sum(agent.log["movements"])
+            for agent in self.agents
+            if "movements" in agent.log
+        )
+        self.report("movements_made", movements_made)
+        self.report(
+            "k",
+            sum((self.p["k0"], self.p["k1"], self.p["k2"], self.p["k3"], self.p["k4"])),
+        )
+
+    def is_in_bounds(self, pos: Tuple[int, int]) -> bool:
+        ans: bool = True
+        for i in range(len(pos)):
+            ans = ans and 0 <= pos[i] < self.grid_size[i]
+        return ans
 
     def clean_percentage(self) -> float:
         return (1 - np.sum(self.grid) / self.grid.size) * 100
 
-# Parameters for the simulation
-params = {
-    "grid_size": (100, 100),
-    "n_agents": ap.IntRange(1, 1000),
-    "dirt_percentage": 1,
-    "steps": 100000,
+
+params: dict = {
+    "n": 100,
+    "m": 100,
+    "k0": ap.IntRange(1, 100),
+    "k1": 0,
+    "k2": 0,
+    "k3": 0,
+    "k4": 0,
+    "dirt_percentage": 0.25,
+    "steps": 100000,  # t_max
 }
 
-sample = ap.Sample(params, n=10)
-experiment = ap.Experiment(CleaningModel, sample, iterations=1, record=True)
-results = experiment.run()
+sample: ap.Sample = ap.Sample(params, n=20)
+experiment: ap.Experiment = ap.Experiment(
+    VacuumModel, sample, iterations=1, record=True
+)
+results: ap.datadict.DataDict = experiment.run()
+results_df: pd.DataFrame = pd.DataFrame(results.reporters)
 
-# Crear un DataFrame con los resultados
-results_df = pd.DataFrame(results.reporters)
-
-# Crear gráfica de número de agentes vs. pasos totales
-sns.scatterplot(data=results_df, x='n_agents', y='total_steps')
-plt.title('Número de Agentes vs. Pasos Totales')
-plt.xlabel('Número de Agentes')
-plt.ylabel('Pasos Totales')
+sns.scatterplot(data=results_df, x="k", y="movements_made")
+plt.title("Number of Agents vs. Movements Made")
+plt.xlabel("Number of Agents")
+plt.ylabel("Movements Made")
 plt.show()
 
-# Crear gráfica de número de agentes vs. tiempo usado con escala logarítmica
-sns.scatterplot(data=results_df, x='n_agents', y='steps_used')
-plt.yscale('log')
-plt.title('Número de Agentes vs. Tiempo Usado (Escala Logarítmica)')
-plt.xlabel('Número de Agentes')
-plt.ylabel('Tiempo Usado (Pasos)')
+sns.scatterplot(data=results_df, x="k", y="time_used")
+plt.title("Number of Agents vs. Time Used")
+plt.xlabel("Number of Agents")
+plt.ylabel("Time Used")
 plt.show()
