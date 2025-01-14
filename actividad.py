@@ -146,6 +146,50 @@ class ExponentialVacuumAgent(ap.Agent):
         self.action()
 
 
+class LevyVacuumAgent(ap.Agent):
+    def setup(self) -> None:
+        self.pos: Tuple[int, int] = (1, 1)
+        self.i: list = ["idle", (0, 0)]
+        self.long_term_utility: int = 0
+
+    def levy_step(self, scale=1.0) -> Tuple[int, int]:
+        angle = self.model.random.uniform(0, 2 * np.pi)
+        distance = self.model.random.paretovariate(1.5) * scale
+        delta_x = int(distance * np.cos(angle))
+        delta_y = int(distance * np.sin(angle))
+        return delta_x, delta_y
+
+    def see(self) -> int:
+        return self.model.grid[self.pos[0], self.pos[1]]
+
+    def next(self, percept: int) -> None:
+        if percept:
+            self.i[0] = "clean"
+        else:
+            position_delta: Tuple[int, int] = self.levy_step()
+            tentative_new_pos: Tuple[int, int] = tuple(
+                map(sum, zip(self.pos, position_delta))
+            )
+            if self.model.is_in_bounds(tentative_new_pos):
+                self.i = ["move", tentative_new_pos]
+            else:
+                self.i[0] = "idle"
+
+    def action(self) -> None:
+        if self.i[0] == "clean":
+            self.model.grid[self.pos[0], self.pos[1]] = 0
+            self.long_term_utility += 1
+        elif self.i[0] == "move":
+            self.pos: Tuple[int, int] = self.i[1]
+            self.record("movements", 1)
+        elif self.i[0] == "idle":
+            self.record("movements", 0)
+
+    def work(self) -> None:
+        self.next(self.see())
+        self.action()
+
+
 class VacuumModel(ap.Model):
     def setup(self) -> None:
         self.grid_size: Tuple[int, int] = (self.p["n"], self.p["m"])
@@ -158,6 +202,7 @@ class VacuumModel(ap.Model):
         self.agents: ap.AgentList = ap.AgentList(self, self.p["k0"], BasicVacuumAgent)
         self.agents.extend(ap.AgentList(self, self.p["k1"], FastVacuumAgent))
         self.agents.extend(ap.AgentList(self, self.p["k2"], ExponentialVacuumAgent))
+        self.agents.extend(ap.AgentList(self, self.p["k3"], LevyVacuumAgent))
         # TODO: Add the other 2 types of agents
 
     def step(self) -> None:
@@ -199,7 +244,7 @@ Corrida D: Corrida de los agentes cuando limpian todas las celdas hasta el 100% 
 
 probability_matrix: np.ndarray = np.zeros((5, 4))
 number_of_experiments0: int = 20
-for i in range(3):  # TODO: Change to 5
+for i in range(4):  # TODO: Change to 5
     for j in range(4):
 
         params0: dict = {
