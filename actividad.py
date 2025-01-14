@@ -57,6 +57,45 @@ class BasicVacuumAgent(ap.Agent):
         self.action()
 
 
+class FastVacuumAgent(ap.Agent):
+    def setup(self) -> None:
+        self.pos: Tuple[int, int] = (1, 1)
+        self.i: list = ["idle", (0, 0)]
+        self.long_term_utility: int = 0
+
+    def see(self) -> int:
+        return self.model.grid[self.pos[0], self.pos[1]]
+
+    def next(self, percept: int) -> None:
+        if percept:
+            self.i[0] = "clean"
+        else:
+            position_delta: Tuple[int, int] = (
+                self.model.random.choice(list(DIRECTIONS_TO_DELTAS_DICT.values())) * 2
+            )
+            tentative_new_pos: Tuple[int, int] = tuple(
+                map(sum, zip(self.pos, position_delta))
+            )
+            if self.model.is_in_bounds(tentative_new_pos):
+                self.i: list = ["move", tentative_new_pos]
+            else:
+                self.i[0] = "idle"
+
+    def action(self) -> None:
+        if self.i[0] == "clean":
+            self.model.grid[self.pos[0], self.pos[1]] = 0
+            self.long_term_utility += 1
+        elif self.i[0] == "move":
+            self.pos: Tuple[int, int] = self.i[1]
+            self.record("movements", 1)
+        elif self.i[0] == "idle":
+            self.record("movements", 0)
+
+    def work(self) -> None:
+        self.next(self.see())
+        self.action()
+
+
 class VacuumModel(ap.Model):
     def setup(self) -> None:
         self.grid_size: Tuple[int, int] = (self.p["n"], self.p["m"])
@@ -66,9 +105,9 @@ class VacuumModel(ap.Model):
             size=self.grid_size,
             p=[1 - self.p["dirt_percentage"], self.p["dirt_percentage"]],
         )
-        self.agents: ap.AgentList = ap.AgentList(
-            self, self.p["k0"], BasicVacuumAgent
-        )  # TODO: Add 4 kinds of agents
+        self.agents: ap.AgentList = ap.AgentList(self, self.p["k0"], BasicVacuumAgent)
+        self.agents.extend(ap.AgentList(self, self.p["k1"], FastVacuumAgent))
+        # TODO: Add the other 3 types of agents
 
     def step(self) -> None:
         self.agents.work()
@@ -109,7 +148,7 @@ Corrida D: Corrida de los agentes cuando limpian todas las celdas hasta el 100% 
 
 probability_matrix: np.ndarray = np.zeros((5, 4))
 number_of_experiments0: int = 20
-for i in range(1):  # TODO: Change to 5
+for i in range(2):  # TODO: Change to 5
     for j in range(4):
 
         params0: dict = {
