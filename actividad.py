@@ -67,7 +67,7 @@ class VacuumModel(ap.Model):
         )
         self.agents: ap.AgentList = ap.AgentList(
             self, self.p["k0"], BasicVacuumAgent
-        )  # TODO: Add agents
+        )  # TODO: Add 4 kinds of agents
 
     def step(self) -> None:
         self.agents.work()
@@ -97,6 +97,18 @@ class VacuumModel(ap.Model):
     def clean_percentage(self) -> float:
         return (1 - np.sum(self.grid) / self.grid.size) * 100
 
+
+# TODO: Deben de calcular probabilidades de cada tipo de agente sobre las siguientes corridas:
+"""
+Corrida A: Corrida de los agentes cuando limpian todas las celdas hasta el 25% del tiempo máximo, no después.
+Corrida B: Corrida de los agentes cuando limpian todas las celdas hasta el 50% del tiempo máximo, no después.
+Corrida C: Corrida de los agentes cuando limpian todas las celdas hasta el 75% del tiempo máximo, no después.
+Corrida D: Corrida de los agentes cuando limpian todas las celdas hasta el 100% del tiempo máximo.
+"""
+
+# TODO: Deben calcular el agente óptimo, o en su caso, el agente con mayor probabilidad de éxito.
+
+# DONE: Analiza cómo la cantidad de agentes impacta el tiempo dedicado, así como la cantidad de movimientos realizados. 
 
 params: dict = {
     "n": 100,
@@ -128,3 +140,5 @@ plt.title("Number of Agents vs. Time Used")
 plt.xlabel("Number of Agents")
 plt.ylabel("Time Used")
 plt.show()
+
+# TODO: También analiza el desempeño de los agentes.
