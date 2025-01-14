@@ -1,182 +1,143 @@
-import agentpy as ap
+import agentpy as ap 
 import numpy as np
-import seaborn as sns
-import matplotlib.pyplot as plt
-import pandas as pd
 from typing import Tuple
 
-
-DIRECTIONS_TO_DELTAS_DICT: dict = {
-    "up": (-1, 0),
-    "down": (1, 0),
-    "left": (0, -1),
-    "right": (0, 1),
-    "up-left": (-1, -1),
-    "up-right": (-1, 1),
-    "down-left": (1, -1),
-    "down-right": (1, 1),
-}
-
-
-class BasicVacuumAgent(ap.Agent):
+# Define base CleaningAgent
+class CleaningAgent(ap.Agent):
     def setup(self) -> None:
-        self.pos: Tuple[int, int] = (1, 1)
-        self.i: list = ["idle", (0, 0)]
-        self.long_term_utility: int = 0
+        self.moves = 0
+        self.cleaned_cells = 0  # Track how many cells the agent cleans
 
     def see(self) -> int:
+        # Check if the current cell is dirty
         return self.model.grid[self.pos[0], self.pos[1]]
 
-    def next(self, percept: int) -> None:
-        if percept:
-            self.i[0] = "clean"
+    def next(self, percept: int) -> int:
+        # Return the percept as internal state
+        return percept
+
+    def action(self, internal_state: int) -> None:
+        if internal_state:  # If the cell is dirty
+            self.model.grid[self.pos[0], self.pos[1]] = 0  # Clean the cell
+            self.cleaned_cells += 1
         else:
-            position_delta: Tuple[int, int] = self.model.random.choice(
-                list(DIRECTIONS_TO_DELTAS_DICT.values())
+            # Move to a random adjacent position
+            move = self.model.random.choice(
+                [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)]
             )
-            tentative_new_pos: Tuple[int, int] = tuple(
-                map(sum, zip(self.pos, position_delta))
-            )
-            if self.model.is_in_bounds(tentative_new_pos):
-                self.i: list = ["move", tentative_new_pos]
-            else:
-                self.i[0] = "idle"
+            new_pos = (self.pos[0] + move[0], self.pos[1] + move[1])
+            if self.model.is_valid_position(new_pos):
+                self.pos = new_pos
+                self.moves += 1
 
-    def action(self) -> None:
-        if self.i[0] == "clean":
-            self.model.grid[self.pos[0], self.pos[1]] = 0
-            self.long_term_utility += 1
-        elif self.i[0] == "move":
-            self.pos: Tuple[int, int] = self.i[1]
-            self.record("movements", 1)
-        elif self.i[0] == "idle":
-            self.record("movements", 0)
+# Define specialized agents
+class FastCleaningAgent(CleaningAgent):
+    def action(self, internal_state: int) -> None:
+        if internal_state:  # If the cell is dirty
+            self.model.grid[self.pos[0], self.pos[1]] = 0  # Clean the cell
+            self.cleaned_cells += 1
+        else:
+            # Move to two random adjacent positions (faster movement)
+            for _ in range(2):
+                move = self.model.random.choice(
+                    [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)]
+                )
+                new_pos = (self.pos[0] + move[0], self.pos[1] + move[1])
+                if self.model.is_valid_position(new_pos):
+                    self.pos = new_pos
+                    self.moves += 1
 
-    def work(self) -> None:
-        self.next(self.see())
-        self.action()
+class StrategicCleaningAgent(CleaningAgent):
+    def action(self, internal_state: int) -> None:
+        if internal_state:  # If the cell is dirty
+            self.model.grid[self.pos[0], self.pos[1]] = 0  # Clean the cell
+            self.cleaned_cells += 1
+        else:
+            # Prefer moving toward dirtier areas
+            dirt_positions = np.argwhere(self.model.grid == 1)
+            if len(dirt_positions) > 0:
+                target = self.model.random.choice(dirt_positions)
+                new_pos = (target[0], target[1])
+                if self.model.is_valid_position(new_pos):
+                    self.pos = new_pos
+                    self.moves += 1
 
-
-class VacuumModel(ap.Model):
+class CleaningModel(ap.Model):
     def setup(self) -> None:
-        self.grid_size: Tuple[int, int] = (self.p["n"], self.p["m"])
-        self.grid: np.ndarray = np.zeros(self.grid_size, dtype=int)
+        self.grid_size: Tuple[int, int] = self.p["grid_size"]
+        self.grid = np.zeros(self.grid_size, dtype=int)
         self.grid[:] = np.random.choice(
             [0, 1],
             size=self.grid_size,
             p=[1 - self.p["dirt_percentage"], self.p["dirt_percentage"]],
         )
-        self.agents: ap.AgentList = ap.AgentList(
-            self, self.p["k0"], BasicVacuumAgent
-        )  # TODO: Add 4 kinds of agents
+        self.initial_grid_state = self.grid.tolist()  # Save initial grid as a list
+
+        # Create agents with different types
+        self.agents = ap.AgentList(self, self.p["n_agents"] // 3, CleaningAgent)
+        self.fast_agents = ap.AgentList(self, self.p["n_agents"] // 3, FastCleaningAgent)
+        self.strategic_agents = ap.AgentList(self, self.p["n_agents"] - 2 * (self.p["n_agents"] // 3), StrategicCleaningAgent)
+        self.agents += self.fast_agents + self.strategic_agents  # Combine all agent types
+
+        for agent in self.agents:
+            agent.pos = (self.random.randint(0, self.grid_size[0]), self.random.randint(0, self.grid_size[1]))
+            while not self.is_valid_position(agent.pos):
+                agent.pos = (self.random.randint(0, self.grid_size[0]), self.random.randint(0, self.grid_size[1]))
+        self.cleaning_start = self.grid.sum()
 
     def step(self) -> None:
-        self.agents.work()
-        if self.grid.sum() == 0:
+        for agent in self.agents:
+            agent.action(agent.next(agent.see()))
+        if self.grid.sum() == 0 or self.t >= self.p["max_steps"]:
             self.stop()
 
     def end(self):
-        self.report("time_used", self.t)
-        self.report("clean_percentage", self.clean_percentage())
-        movements_made: int = sum(
-            sum(agent.log["movements"])
-            for agent in self.agents
-            if "movements" in agent.log
-        )
-        self.report("movements_made", movements_made)
-        self.report(
-            "k",
-            sum((self.p["k0"], self.p["k1"], self.p["k2"], self.p["k3"], self.p["k4"])),
-        )
+        total_moves = sum(agent.moves for agent in self.agents)
+        final_grid_state = self.grid.tolist()  # Save final grid as a list
 
-    def is_in_bounds(self, pos: Tuple[int, int]) -> bool:
-        ans: bool = True
-        for i in range(len(pos)):
-            ans = ans and 0 <= pos[i] < self.grid_size[i]
-        return ans
+        print("Initial grid as list:")
+        print(self.initial_grid_state)
+
+        print("Final grid as list:")
+        print(final_grid_state)
+
+        print(f"Simulation ended after {self.t} steps.")
+        print(f"Cleaning percentage: {self.clean_percentage():.2f}%")
+        print(f"Total moves by all agents: {total_moves}")
+
+        # Individual performance metrics
+        for i, agent in enumerate(self.agents):
+            print(f"Agent {i + 1}: {agent.moves} moves, {agent.cleaned_cells} cells cleaned")
+
+        # Probabilities for each run (A, B, C, D)
+        total_cells = self.cleaning_start  # Total dirty cells at the start
+        results = {0.25: 0, 0.5: 0, 0.75: 0, 1.0: 0}
+
+        for agent in self.agents:
+            cleaned_percentage = agent.cleaned_cells / total_cells
+            print(f"Agent cleaned {cleaned_percentage * 100:.2f}% of total cells.")  # Debugging percentage
+            for threshold in sorted(results.keys()):
+                if cleaned_percentage >= threshold:
+                    results[threshold] += 1
+
+        print("Summary of agents meeting cleaning thresholds:")
+        for threshold, count in sorted(results.items()):
+            print(f"Agents cleaning at least {threshold * 100}%: {count}")
+
+    def is_valid_position(self, pos: Tuple[int, int]) -> bool:
+        return 0 <= pos[0] < self.grid_size[0] and 0 <= pos[1] < self.grid_size[1]
 
     def clean_percentage(self) -> float:
-        return (1 - np.sum(self.grid) / self.grid.size) * 100
+        return (1 - np.sum(self.grid) / self.cleaning_start) * 100
 
-
-# DONE: Deben de calcular probabilidades de cada tipo de agente sobre las siguientes corridas:
-"""
-Corrida A: Corrida de los agentes cuando limpian todas las celdas hasta el 25% del tiempo máximo, no después.
-Corrida B: Corrida de los agentes cuando limpian todas las celdas hasta el 50% del tiempo máximo, no después.
-Corrida C: Corrida de los agentes cuando limpian todas las celdas hasta el 75% del tiempo máximo, no después.
-Corrida D: Corrida de los agentes cuando limpian todas las celdas hasta el 100% del tiempo máximo.
-"""
-
-probability_matrix: np.ndarray = np.zeros((5, 4))
-number_of_experiments0: int = 20
-for i in range(1):  # TODO: Change to 5
-    for j in range(4):
-
-        params0: dict = {
-            "n": 50,
-            "m": 50,
-            "k0": 10 if i == 0 else 0,
-            "k1": 10 if i == 1 else 0,
-            "k2": 10 if i == 2 else 0,
-            "k3": 10 if i == 3 else 0,
-            "k4": 10 if i == 4 else 0,
-            "dirt_percentage": 0.25,
-            "steps": 20000 * (j + 1) // 4,  # percentage of t_max
-        }
-        sample0: ap.Sample = ap.Sample(params0)
-        experiment0: ap.Experiment = ap.Experiment(
-            VacuumModel, sample0, iterations=number_of_experiments0, record=True
-        )
-        results0: ap.datadict.DataDict = experiment0.run()
-        results_df0: pd.DataFrame = pd.DataFrame(results0.reporters)
-        probability_matrix[i, j] = (
-            results_df0["clean_percentage"].eq(100).sum() / number_of_experiments0
-        )
-
-print(probability_matrix)
-sns.heatmap(probability_matrix, annot=True, fmt=".2f")
-plt.title(
-    "Probability of Success (100% Cleaned) for Different Kinds of Agents and Runs"
-)
-plt.xlabel("Run")
-plt.ylabel("Agent")
-plt.show()
-
-
-# TODO: Deben calcular el agente óptimo, o en su caso, el agente con mayor probabilidad de éxito.
-
-
-# DONE: Analiza cómo la cantidad de agentes impacta el tiempo dedicado, así como la cantidad de movimientos realizados.
-
-params1: dict = {
-    "n": 100,
-    "m": 100,
-    "k0": ap.IntRange(1, 100),
-    "k1": 0,
-    "k2": 0,
-    "k3": 0,
-    "k4": 0,
-    "dirt_percentage": 0.25,
-    "steps": 100000,  # t_max
+# Parameters for the simulation
+params = {
+    "grid_size": (10, 10),
+    "n_agents": 6,  # Updated to 6 agents
+    "dirt_percentage": 0.2,
+    "max_steps": 1000,
 }
 
-sample1: ap.Sample = ap.Sample(params1, n=20)
-experiment1: ap.Experiment = ap.Experiment(
-    VacuumModel, sample1, iterations=1, record=True
-)
-results1: ap.datadict.DataDict = experiment1.run()
-results_df1: pd.DataFrame = pd.DataFrame(results1.reporters)
+model = CleaningModel(params)
+model.run()
 
-sns.scatterplot(data=results_df1, x="k", y="movements_made")
-plt.title("Number of Agents vs. Movements Made")
-plt.xlabel("Number of Agents")
-plt.ylabel("Movements Made")
-plt.show()
-
-sns.scatterplot(data=results_df1, x="k", y="time_used")
-plt.title("Number of Agents vs. Time Used")
-plt.xlabel("Number of Agents")
-plt.ylabel("Time Used")
-plt.show()
-
-# TODO: También analiza el desempeño de los agentes.
