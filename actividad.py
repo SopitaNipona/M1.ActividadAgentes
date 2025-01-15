@@ -22,7 +22,6 @@ class BasicVacuumAgent(ap.Agent):
     def setup(self) -> None:
         self.pos: Tuple[int, int] = (1, 1)
         self.i: list = ["idle", (0, 0)]
-        self.long_term_utility: int = 0
 
     def see(self) -> int:
         return self.model.grid[self.pos[0], self.pos[1]]
@@ -45,11 +44,14 @@ class BasicVacuumAgent(ap.Agent):
     def action(self) -> None:
         if self.i[0] == "clean":
             self.model.grid[self.pos[0], self.pos[1]] = 0
-            self.long_term_utility += 1
+            self.record("local_state_utility", 1)
+            self.record("movements", 0)
         elif self.i[0] == "move":
             self.pos: Tuple[int, int] = self.i[1]
+            self.record("local_state_utility", 0)
             self.record("movements", 1)
         elif self.i[0] == "idle":
+            self.record("local_state_utility", 0)
             self.record("movements", 0)
 
     def work(self) -> None:
@@ -61,7 +63,6 @@ class FastVacuumAgent(ap.Agent):
     def setup(self) -> None:
         self.pos: Tuple[int, int] = (1, 1)
         self.i: list = ["idle", (0, 0)]
-        self.long_term_utility: int = 0
 
     def see(self) -> int:
         return self.model.grid[self.pos[0], self.pos[1]]
@@ -91,11 +92,14 @@ class FastVacuumAgent(ap.Agent):
     def action(self) -> None:
         if self.i[0] == "clean":
             self.model.grid[self.pos[0], self.pos[1]] = 0
-            self.long_term_utility += 1
+            self.record("local_state_utility", 1)
+            self.record("movements", 0)
         elif self.i[0] == "move":
             self.pos: Tuple[int, int] = self.i[1]
+            self.record("local_state_utility", 0)
             self.record("movements", 1)
         elif self.i[0] == "idle":
+            self.record("local_state_utility", 0)
             self.record("movements", 0)
 
     def work(self) -> None:
@@ -107,7 +111,6 @@ class ExponentialVacuumAgent(ap.Agent):
     def setup(self) -> None:
         self.pos: Tuple[int, int] = (1, 1)
         self.i: list = ["idle", (0, 0), 0]
-        self.long_term_utility: int = 0
 
     def see(self) -> int:
         return self.model.grid[self.pos[0], self.pos[1]]
@@ -134,11 +137,14 @@ class ExponentialVacuumAgent(ap.Agent):
     def action(self) -> None:
         if self.i[0] == "clean":
             self.model.grid[self.pos[0], self.pos[1]] = 0
-            self.long_term_utility += 1
+            self.record("local_state_utility", 1)
+            self.record("movements", 0)
         elif self.i[0] == "move":
             self.pos: Tuple[int, int] = self.i[1]
+            self.record("local_state_utility", 0)
             self.record("movements", 1)
         elif self.i[0] == "idle":
+            self.record("local_state_utility", 0)
             self.record("movements", 0)
 
     def work(self) -> None:
@@ -150,7 +156,6 @@ class LevyVacuumAgent(ap.Agent):
     def setup(self) -> None:
         self.pos: Tuple[int, int] = (1, 1)
         self.i: list = ["idle", (0, 0)]
-        self.long_term_utility: int = 0
 
     def levy_step(self, scale=1.0) -> Tuple[int, int]:
         angle = self.model.random.uniform(0, 2 * np.pi)
@@ -178,11 +183,14 @@ class LevyVacuumAgent(ap.Agent):
     def action(self) -> None:
         if self.i[0] == "clean":
             self.model.grid[self.pos[0], self.pos[1]] = 0
-            self.long_term_utility += 1
+            self.record("local_state_utility", 1)
+            self.record("movements", 0)
         elif self.i[0] == "move":
             self.pos: Tuple[int, int] = self.i[1]
+            self.record("local_state_utility", 0)
             self.record("movements", 1)
         elif self.i[0] == "idle":
+            self.record("local_state_utility", 0)
             self.record("movements", 0)
 
     def work(self) -> None:
@@ -194,7 +202,6 @@ class LinearVacuumAgent(ap.Agent):
     def setup(self) -> None:
         self.pos: Tuple[int, int] = (1, 1)
         self.i: list = ["idle", (0, 0), 0]
-        self.long_term_utility: int = 0
 
     def see(self) -> int:
         return self.model.grid[self.pos[0], self.pos[1]]
@@ -221,11 +228,14 @@ class LinearVacuumAgent(ap.Agent):
     def action(self) -> None:
         if self.i[0] == "clean":
             self.model.grid[self.pos[0], self.pos[1]] = 0
-            self.long_term_utility += 1
+            self.record("local_state_utility", 1)
+            self.record("movements", 0)
         elif self.i[0] == "move":
             self.pos: Tuple[int, int] = self.i[1]
+            self.record("local_state_utility", 0)
             self.record("movements", 1)
         elif self.i[0] == "idle":
+            self.record("local_state_utility", 0)
             self.record("movements", 0)
 
     def work(self) -> None:
@@ -266,6 +276,17 @@ class VacuumModel(ap.Model):
             "k",
             sum((self.p["k0"], self.p["k1"], self.p["k2"], self.p["k3"], self.p["k4"])),
         )
+        for agent in self.agents:
+            self.report(
+                f"agent_{agent.id}_utility_log",
+                agent.log.get("local_state_utility", []),
+            )
+        average_of_long_term_utilities: float = sum(
+            sum(agent.log["local_state_utility"])
+            for agent in self.agents
+            if "local_state_utility" in agent.log
+        ) / len(self.agents)
+        self.report("average_long_term_utility", average_of_long_term_utilities)
 
     def is_in_bounds(self, pos: Tuple[int, int]) -> bool:
         ans: bool = True
@@ -277,30 +298,26 @@ class VacuumModel(ap.Model):
         return (1 - np.sum(self.grid) / self.grid.size) * 100
 
 
-# DONE: Deben de calcular probabilidades de cada tipo de agente sobre las siguientes corridas:
-"""
-Corrida A: Corrida de los agentes cuando limpian todas las celdas hasta el 25% del tiempo máximo, no después.
-Corrida B: Corrida de los agentes cuando limpian todas las celdas hasta el 50% del tiempo máximo, no después.
-Corrida C: Corrida de los agentes cuando limpian todas las celdas hasta el 75% del tiempo máximo, no después.
-Corrida D: Corrida de los agentes cuando limpian todas las celdas hasta el 100% del tiempo máximo.
-"""
+# Experiment 1
 
 probability_matrix: np.ndarray = np.zeros((5, 4))
-number_of_experiments0: int = 20
+average_utility_matrix: np.ndarray = np.zeros((5, 4))
+number_of_experiments0: int = 50  # 50
 for i in range(5):
     for j in range(4):
 
         params0: dict = {
-            "n": 50,
-            "m": 50,
-            "k0": 10 if i == 0 else 0,
-            "k1": 10 if i == 1 else 0,
-            "k2": 10 if i == 2 else 0,
-            "k3": 10 if i == 3 else 0,
-            "k4": 10 if i == 4 else 0,
+            "n": 100,
+            "m": 100,
+            "k0": 0,
+            "k1": 0,
+            "k2": 0,
+            "k3": 0,
+            "k4": 0,
             "dirt_percentage": 0.25,
-            "steps": 20000 * (j + 1) // 4,  # percentage of t_max
+            "steps": 30000 * (j + 1) // 4,  # percentage of t_max
         }
+        params0[f"k{i}"] = 20
         sample0: ap.Sample = ap.Sample(params0)
         experiment0: ap.Experiment = ap.Experiment(
             VacuumModel, sample0, iterations=number_of_experiments0, record=True
@@ -310,6 +327,7 @@ for i in range(5):
         probability_matrix[i, j] = (
             results_df0["clean_percentage"].eq(100).sum() / number_of_experiments0
         )
+        average_utility_matrix[i, j] = results_df0["average_long_term_utility"].mean()
 
 print(probability_matrix)
 sns.heatmap(probability_matrix, annot=True, fmt=".2f")
@@ -323,38 +341,97 @@ plt.show()
 
 # TODO: Deben calcular el agente óptimo, o en su caso, el agente con mayor probabilidad de éxito.
 
+print(average_utility_matrix)
+sns.heatmap(average_utility_matrix, annot=True, fmt=".2f")
+plt.title("Average Long Term Utility for Different Kinds of Agents and Runs")
+plt.xlabel("Run")
+plt.ylabel("Agent")
+plt.show()
 
-# DONE: Analiza cómo la cantidad de agentes impacta el tiempo dedicado, así como la cantidad de movimientos realizados.
+# Experiment 2
 
-params1: dict = {
-    "n": 100,
-    "m": 100,
-    "k0": ap.IntRange(1, 100),
-    "k1": 0,
-    "k2": 0,
-    "k3": 0,
-    "k4": 0,
-    "dirt_percentage": 0.25,
-    "steps": 100000,  # t_max
-}
+number_of_samples = 50
+max_agents = 100
+all_results = []
+for i in range(5):
+    params = {
+        "n": 100,
+        "m": 100,
+        "k0": 0,
+        "k1": 0,
+        "k2": 0,
+        "k3": 0,
+        "k4": 0,
+        "dirt_percentage": 0.25,
+        "steps": 100000,  # t_max
+    }
+    params[f"k{i}"] = ap.IntRange(1, max_agents)
+    sample = ap.Sample(params, n=number_of_samples)
+    experiment = ap.Experiment(VacuumModel, sample, iterations=1, record=True)
+    results = experiment.run()
+    results_df = pd.DataFrame(results.reporters)
+    results_df["Agent_Type"] = f"k{i}"
+    all_results.append(results_df)
 
-sample1: ap.Sample = ap.Sample(params1, n=20)
-experiment1: ap.Experiment = ap.Experiment(
-    VacuumModel, sample1, iterations=1, record=True
+final_results_df = pd.concat(all_results, ignore_index=True)
+
+plt.figure(figsize=(10, 6))
+sns.scatterplot(
+    data=final_results_df, x="k", y="movements_made", hue="Agent_Type", palette="Set1"
 )
-results1: ap.datadict.DataDict = experiment1.run()
-results_df1: pd.DataFrame = pd.DataFrame(results1.reporters)
-
-sns.scatterplot(data=results_df1, x="k", y="movements_made")
 plt.title("Number of Agents vs. Movements Made")
 plt.xlabel("Number of Agents")
 plt.ylabel("Movements Made")
+plt.legend(title="Agent Type")
 plt.show()
 
-sns.scatterplot(data=results_df1, x="k", y="time_used")
+plt.figure(figsize=(10, 6))
+sns.scatterplot(
+    data=final_results_df, x="k", y="time_used", hue="Agent_Type", palette="Set1"
+)
 plt.title("Number of Agents vs. Time Used")
 plt.xlabel("Number of Agents")
 plt.ylabel("Time Used")
+plt.legend(title="Agent Type")
 plt.show()
 
-# TODO: También analiza el desempeño de los agentes.
+# Experiment 3
+
+number_of_agents2: int = 20
+for i in range(5):
+    params2: dict = {
+        "n": 100,
+        "m": 100,
+        "k0": 0,
+        "k1": 0,
+        "k2": 0,
+        "k3": 0,
+        "k4": 0,
+        "dirt_percentage": 0.25,
+        "steps": 100000,  # t_max
+    }
+    params2[f"k{i}"] = number_of_agents2
+    sample2: ap.Sample = ap.Sample(params2)
+    experiment2: ap.Experiment = ap.Experiment(
+        VacuumModel, sample2, iterations=1, record=True
+    )
+    results2: ap.datadict.DataDict = experiment2.run()
+    results_df2: pd.DataFrame = pd.DataFrame(results2.reporters)
+
+    cumulative_utility = []
+    for agent_id in range(number_of_agents2):
+        key = f"agent_{agent_id}_utility_log"
+        if key in results_df2.columns:
+            utility_list = results_df2[key].iloc[0]
+            cumulative_utility.append(np.cumsum(utility_list))
+
+    plt.figure()
+    for idx, utility in enumerate(cumulative_utility):
+        plt.plot(utility, label=f"Agent {idx}")
+
+    plt.title(f"Cumulative Utility for Agent Type {i}")
+    plt.xlabel("Time Steps")
+    plt.ylabel("Cumulative Utility")
+    plt.legend(loc="upper left", bbox_to_anchor=(1, 1))
+    plt.tight_layout()
+    plt.show()
